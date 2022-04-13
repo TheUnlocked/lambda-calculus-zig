@@ -1,0 +1,1 @@
+(\fix.\fact. (fix fact) 4) (\g.(\x.g (x x)) (\x.g (x x))) ((\iszero.\mult.\pred. (\f.\n. (iszero n) 1 (mult n (f (pred n))))) (\n. n (\x.\x.\y.y) (\x.\y.x)) (\m.\n.\f.m (n f)) (\n.\f.\x.n (\g.\h.h (g f)) (\u.x) (\u.u)))
