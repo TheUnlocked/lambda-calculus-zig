@@ -54,7 +54,9 @@ pub fn Element(mutable: bool) type {
         }
 
         pub fn free(self: *const Self, allocator: std.mem.Allocator) void {
-            self.freeRec(allocator, &std.AutoHashMap(*const Self, void).init(allocator));
+            var freeTable = std.AutoHashMap(*const Self, void).init(allocator);
+            defer freeTable.deinit();
+            self.freeRec(allocator, &freeTable);
         }
 
         fn freeRec(self: *const Self, allocator: std.mem.Allocator, freeSet: *std.AutoHashMap(*const Self, void)) void {
@@ -70,8 +72,8 @@ pub fn Element(mutable: bool) type {
                     },
                 }
                 // If this fails there's not much we can do to recover.
-                freeSet.put(self, {}) catch unreachable;
                 allocator.destroy(self);
+                freeSet.put(self, {}) catch unreachable;
             }
         }
 

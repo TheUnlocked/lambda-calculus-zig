@@ -40,7 +40,9 @@ const simplify = @import("simplify.zig");
 
 test "Numbers are emitted in alpha normal form" {
     var n1 = try makeNumber(std.testing.allocator, 30, .church);
+    defer n1.free(std.testing.allocator);
     var n2 = try makeNumber(std.testing.allocator, 30, .church);
+    defer n2.free(std.testing.allocator);
     try simplify.alphaNormalizeMut(std.testing.allocator, n2);
     try std.testing.expect(n1.equals(n2.*));
 }

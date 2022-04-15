@@ -1,5 +1,6 @@
 const std = @import("std");
 const parser = @import("parser.zig");
+const elt = @import("element.zig");
 const simplify = @import("simplify.zig");
 
 const Allocator = std.mem.Allocator;
@@ -12,16 +13,29 @@ pub fn main() anyerror!void {
     
     const reader = std.io.getStdIn().reader();
 
+    var parseState = parser.ParseState.init(allocator);
+
     while (true) {
         const input = try readLine(allocator, reader);
         defer allocator.free(input);
 
-        const parsed = parser.parse(allocator, input) catch |err| {
+        const statement = parser.parseStatement(&parseState, input) catch |err| {
             const msg = try std.fmt.allocPrint(allocator, "Parse error: {s}", .{ @errorName(err) });
             defer allocator.free(msg);
             try writeLine(msg);
             continue;
         };
+
+        var parsed: *const elt.Element(false) = undefined;
+
+        switch (statement) {
+            .element => |elt_| parsed = elt_,
+            .define => |defn| {
+                parsed = defn.element;
+            },
+            else => continue,
+        }
+
         defer parsed.free(allocator);
 
         const simplified = try simplify.simplify(allocator, parsed);
