@@ -14,15 +14,17 @@ pub fn makeNumber(allocator: std.mem.Allocator, n: u32, comptime technique: Numb
     switch (technique) {
         .church => {
             var x = try alloc_utils.createWith(allocator, MutableElement { .variable = 1 });
-            var f = try alloc_utils.createWith(allocator, MutableElement { .variable = 0 });
             var applicativePart = x;
 
-            var i: u32 = 0;
-            while (i < n) : (i += 1) {
-                applicativePart = try alloc_utils.createWith(allocator, MutableElement { .apply = .{
-                    .target = f,
-                    .arg = applicativePart,
-                } });
+            if (n > 0) {
+                var f = try alloc_utils.createWith(allocator, MutableElement { .variable = 0 });
+                var i: u32 = 0;
+                while (i < n) : (i += 1) {
+                    applicativePart = try alloc_utils.createWith(allocator, MutableElement { .apply = .{
+                        .target = f,
+                        .arg = applicativePart,
+                    } });
+                }
             }
 
             return try alloc_utils.createWith(allocator, MutableElement { .lambda = .{
@@ -37,6 +39,29 @@ pub fn makeNumber(allocator: std.mem.Allocator, n: u32, comptime technique: Numb
 }
 
 const simplify = @import("simplify.zig");
+const expect = std.testing.expect;
+
+test "Church 0 is \\@0 . \\@1 . \\@1" {
+    var n = try makeNumber(std.testing.allocator, 0, .church);
+    defer n.free(std.testing.allocator);
+
+    switch (n.*) {
+        .lambda => |lam1| {
+            try expect(lam1.param == 0);
+            switch (lam1.body.*) {
+                .lambda => |lam2| {
+                    try expect(lam2.param == 1);
+                    switch (lam2.body.*) {
+                        .variable => |sym| try expect(sym == 1),
+                        else => return error.Fail,
+                    }
+                },
+                else => return error.Fail,
+            }
+        },
+        else => return error.Fail,
+    }
+}
 
 test "Numbers are emitted in alpha normal form" {
     var n1 = try makeNumber(std.testing.allocator, 30, .church);
@@ -44,5 +69,5 @@ test "Numbers are emitted in alpha normal form" {
     var n2 = try makeNumber(std.testing.allocator, 30, .church);
     defer n2.free(std.testing.allocator);
     try simplify.alphaNormalizeMut(std.testing.allocator, n2);
-    try std.testing.expect(n1.equals(n2.*));
+    try expect(n1.equals(n2.*));
 }

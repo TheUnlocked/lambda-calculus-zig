@@ -162,7 +162,7 @@ test "(\\@1 . @1) @0 => @0" {
 const parser = @import("parser.zig");
 
 test "(snd (pair true false)) => false" {
-    const parsed = try parser.parseOneElement(std.testing.allocator, "(\\true.\\false.(\\pair.\\snd. (snd (pair true false))) (\\x.\\y.\\f.f x y) (\\p.p false)) (\\x.\\y.x) (\\x.\\y.y)");
+    const parsed = try parser.parseElement(std.testing.allocator, "(\\true.\\false.(\\pair.\\snd. (snd (pair true false))) (\\x.\\y.\\f.f x y) (\\p.p false)) (\\x.\\y.x) (\\x.\\y.y)");
     const simplified = try simplify(std.testing.allocator, parsed);
     parsed.free(std.testing.allocator);
     defer simplified.free(std.testing.allocator);
@@ -185,7 +185,7 @@ test "(snd (pair true false)) => false" {
 }
 
 test "Compute factorial 3" {
-    const parsed = try parser.parseOneElement(
+    const parsed = try parser.parseElement(
         std.testing.allocator,
         "(\\fix.\\fact. (fix fact) 3) (\\g.(\\x.g (x x)) (\\x.g (x x))) ((\\iszero.\\mult.\\pred. (\\f.\\n. (iszero n) 1 (mult n (f (pred n))))) (\\n. n (\\x.\\x.\\y.y) (\\x.\\y.x)) (\\m.\\n.\\f.m (n f)) (\\n.\\f.\\x.n (\\g.\\h.h (g f)) (\\u.x) (\\u.u)))"
     );
@@ -262,7 +262,7 @@ fn alphaNormalizeMutRec(st: *AlphaNormalizeState, elt: *MutableElement) std.mem.
 }
 
 test "(snd (pair true false)) normalizes to \\@0. \\@1. @1" {
-    const parsed = try parser.parseOneElement(std.testing.allocator, "(\\true.\\false.(\\pair.\\snd. (snd (pair true false))) (\\x.\\y.\\f.f x y) (\\p.p false)) (\\x.\\y.x) (\\x.\\y.y)");
+    const parsed = try parser.parseElement(std.testing.allocator, "(\\true.\\false.(\\pair.\\snd. (snd (pair true false))) (\\x.\\y.\\f.f x y) (\\p.p false)) (\\x.\\y.x) (\\x.\\y.y)");
     const simplified = try simplify(std.testing.allocator, parsed);
     parsed.free(std.testing.allocator);
     const normalized = try alphaNormalize(std.testing.allocator, simplified);

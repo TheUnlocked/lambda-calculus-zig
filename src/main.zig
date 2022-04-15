@@ -13,41 +13,37 @@ pub fn main() anyerror!void {
     
     const reader = std.io.getStdIn().reader();
 
-    var parseState = parser.ParseState.init(allocator);
-
     while (true) {
         const input = try readLine(allocator, reader);
         defer allocator.free(input);
 
-        const statement = parser.parseStatement(&parseState, input) catch |err| {
+        const statement = parser.parseStatement(allocator, input) catch |err| {
             const msg = try std.fmt.allocPrint(allocator, "Parse error: {s}", .{ @errorName(err) });
             defer allocator.free(msg);
             try writeLine(msg);
             continue;
         };
 
-        var parsed: *const elt.Element(false) = undefined;
-
         switch (statement) {
-            .element => |elt_| parsed = elt_,
+            .element => |parsed| {
+                defer parsed.free(allocator);
+                const simplified = try simplify.simplify(allocator, parsed);
+                defer simplified.free(allocator);
+                
+                const normalized = try simplify.alphaNormalize(allocator, simplified);
+                defer normalized.free(allocator);
+
+                const outstr = try normalized.toString(allocator);
+                defer allocator.free(outstr);
+
+                try writeLine(outstr);
+            },
             .define => |defn| {
-                parsed = defn.element;
+                _ = defn;
+                // parsed = defn.element;
             },
             else => continue,
         }
-
-        defer parsed.free(allocator);
-
-        const simplified = try simplify.simplify(allocator, parsed);
-        defer simplified.free(allocator);
-        
-        const normalized = try simplify.alphaNormalize(allocator, simplified);
-        defer normalized.free(allocator);
-
-        const outstr = try normalized.toString(allocator);
-        defer allocator.free(outstr);
-
-        try writeLine(outstr);
     }
 }
 

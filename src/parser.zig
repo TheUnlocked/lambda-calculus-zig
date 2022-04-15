@@ -20,9 +20,9 @@ const ParseError = error {
 };
 
 
-pub fn parseStatement(st: *ParseState, str: []const u8) !Statement {
+pub fn parseStatement(allocator: std.mem.Allocator, str: []const u8) !Statement {
     if (str[0] == '!') {
-        // Directives    
+        // Directives 
     }
 
     var rest = skipWhitespace(str);
@@ -43,13 +43,13 @@ pub fn parseStatement(st: *ParseState, str: []const u8) !Statement {
         rest = str[assignmentIndex + 1..];
 
         return Statement {
-            .define = .{ .name = name, .element = try parseElement(st, rest) }
+            .define = .{ .name = name, .element = try parseElement(allocator, rest) }
         };
     }
 
     // Expression
     return Statement {
-        .element = try parseElement(st, rest),
+        .element = try parseElement(allocator, rest),
     };
 }
 
@@ -58,7 +58,7 @@ const ParseElementResult = struct {
     rest: []const u8,
 };
 
-pub const ParseState = struct {
+const ParseState = struct {
     const LL = std.SinglyLinkedList(struct {
         name: []const u8,
         oldSym: ?elt.Symbol = null,
@@ -70,14 +70,14 @@ pub const ParseState = struct {
     symbolTable: HT,
     restoreStack: LL = .{},
 
-    pub fn init(allocator: std.mem.Allocator) ParseState {
+    fn init(allocator: std.mem.Allocator) ParseState {
         return ParseState {
             .allocator = allocator,
             .symbolTable = HT.init(allocator),
         };
     }
 
-    pub fn deinit(self: *ParseState) void {
+    fn deinit(self: *ParseState) void {
         ll_utils.free(self.allocator, &self.restoreStack);
         self.symbolTable.deinit();
     }
@@ -152,18 +152,14 @@ pub const ParseState = struct {
     }
 };
 
-pub fn parseOneElement(allocator: std.mem.Allocator, str: []const u8) !*const Element {
+pub fn parseElement(allocator: std.mem.Allocator, str: []const u8) !*const Element {
     var st = ParseState.init(allocator);
     defer st.deinit();
-    return parseElement(&st, str);
-}
-
-pub fn parseElement(st: *ParseState, str: []const u8) !*const Element {
-    return (try parseRoot(st, str)).elt;
+    return (try parseRoot(&st, str)).elt;
 }
 
 test "parse '\\x. (\\x. x) x'" {
-    const result = try parseOneElement(std.testing.allocator, "\\x. (\\x. x) x");
+    const result = try parseElement(std.testing.allocator, "\\x. (\\x. x) x");
     defer result.free(std.testing.allocator);
 
     switch (result.*) {
@@ -194,7 +190,7 @@ test "parse '\\x. (\\x. x) x'" {
 }
 
 test "parse '\\x. \\a. a x x'" {
-    const result = try parseOneElement(std.testing.allocator, "\\x. \\a. a x x");
+    const result = try parseElement(std.testing.allocator, "\\x. \\a. a x x");
     defer result.free(std.testing.allocator);
 
     switch (result.*) {
@@ -234,7 +230,7 @@ test "parse '\\x. \\a. a x x'" {
 }
 
 test "parse '\\x. \\y. \\a. a x y'" {
-    const result = try parseOneElement(std.testing.allocator, "\\x. \\y. \\a. a x y");
+    const result = try parseElement(std.testing.allocator, "\\x. \\y. \\a. a x y");
     defer result.free(std.testing.allocator);
 
     switch (result.*) {
