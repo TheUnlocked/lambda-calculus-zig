@@ -51,23 +51,57 @@ const SimplifyState = struct {
     }
 };
 
-pub fn simplify(allocator: std.mem.Allocator, elt: *const Element) !*const Element {
+pub fn performSubstitutions(
+    allocator: std.mem.Allocator,
+    substitutions: std.AutoHashMap(Symbol, *const Element),
+    elt: *const Element
+) !*const Element {
+    var newElt = try elt.deepClone(allocator, true);
+
+    var st = SimplifyState.init(allocator);
+    defer st.deinit();
+
+    var iter = substitutions.iterator();
+    while (iter.next()) |entry| {
+        var replaceWith = try entry.value_ptr.*.deepClone(allocator, true);
+        if (!replace(&st, &newElt, entry.key_ptr.*, replaceWith)) {
+            replaceWith.free(allocator);
+        }
+    }
+
+    return newElt.castImmutable();
+}
+
+pub fn simplify(
+    allocator: std.mem.Allocator,
+    elt: *const Element
+) !*const Element {
     var st = SimplifyState.init(allocator);
     defer st.deinit();
 
     var simplified = try elt.deepClone(allocator, true);
-    // try st.markMaybeFree(simplified);
 
-    st.changed = true;
-    while (st.changed) {
-        st.changed = false;
-        try simplifyStep(&st, &simplified);
+    errdefer simplified.free(allocator);
+    defer {
+        st.markNotFree(simplified);
+        var toFree = st.toFree.keyIterator();
+        while (toFree.next()) |item| {
+            st.allocator.destroy(item.*);
+        }
     }
 
-    st.markNotFree(simplified);
-    var toFree = st.toFree.keyIterator();
-    while (toFree.next()) |item| {
-        st.allocator.destroy(item.*);
+    var iterations: u32 = 0;
+    st.changed = true;
+    while (st.changed) : (iterations += 1) {
+        if (iterations == 10_000) {
+            return error.InfiniteLoop;
+        }
+        if (simplified.size() > 100_000) {
+            return error.TooLarge;
+        }
+
+        st.changed = false;
+        try simplifyStep(&st, &simplified);
     }
 
     return simplified.castImmutable();

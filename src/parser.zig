@@ -20,7 +20,7 @@ const ParseError = error {
 };
 
 
-pub fn parseStatement(allocator: std.mem.Allocator, str: []const u8) !Statement {
+pub fn parseStatement(state: *ParseState, str: []const u8) !Statement {
     if (str[0] == '!') {
         // Directives 
     }
@@ -43,14 +43,39 @@ pub fn parseStatement(allocator: std.mem.Allocator, str: []const u8) !Statement 
         rest = str[assignmentIndex + 1..];
 
         return Statement {
-            .define = .{ .name = name, .element = try parseElement(allocator, rest) }
+            .define = .{ .name = name, .element = (try parseRoot(state, rest)).elt }
         };
     }
 
     // Expression
     return Statement {
-        .element = try parseElement(allocator, rest),
+        .element = (try parseRoot(state, rest)).elt,
     };
+}
+
+test "parseStatement x = \\x.x" {
+    var st = ParseState.init(std.testing.allocator);
+    defer st.deinit();
+
+    const statement = try parseStatement(&st, "x = \\x.x");
+    switch (statement) {
+        .define => |defn| {
+            defer defn.element.free(std.testing.allocator);
+
+            try std.testing.expectEqualStrings("x", defn.name);
+            switch (defn.element.*) {
+                .lambda => |lam| {
+                    try expect(lam.param == 0);
+                    switch (lam.body.*) {
+                        .variable => |sym| try expect(sym == 0),
+                        else => return error.Fail,
+                    }
+                },
+                else => return error.Fail,
+            }
+        },
+        else => return error.Fail,
+    }
 }
 
 const ParseElementResult = struct {
@@ -58,36 +83,36 @@ const ParseElementResult = struct {
     rest: []const u8,
 };
 
-const ParseState = struct {
-    const LL = std.SinglyLinkedList(struct {
-        name: []const u8,
-        oldSym: ?elt.Symbol = null,
+pub const ParseState = struct {
+    const HT = std.StringHashMap(struct {
+        symbol: elt.Symbol,
+        count: u32,
     });
-    const HT = std.StringHashMap(elt.Symbol);
 
     allocator: std.mem.Allocator,
     symbolIterator: elt.Symbol = 0,
     symbolTable: HT,
-    restoreStack: LL = .{},
 
-    fn init(allocator: std.mem.Allocator) ParseState {
+    pub fn init(allocator: std.mem.Allocator) ParseState {
         return ParseState {
             .allocator = allocator,
             .symbolTable = HT.init(allocator),
         };
     }
 
-    fn deinit(self: *ParseState) void {
-        ll_utils.free(self.allocator, &self.restoreStack);
+    pub fn deinit(self: *ParseState) void {
+        var symbolStrings = self.symbolTable.keyIterator();
+        while (symbolStrings.next()) |str| {
+            self.allocator.free(str.*);
+        }
         self.symbolTable.deinit();
     }
 
     /// Snapshots can only be used once. If a snapshot is unused, it should be deinitialized explicitly.
     /// Snapshots should not be deinitialized if they are used.
-    pub fn makeSnapshot(self: ParseState, snapshot: *ParseState) !*ParseState {
+    pub fn makeSnapshot(self: ParseState, snapshot: *ParseState) !void {
         snapshot.* = self;
         snapshot.symbolTable = try snapshot.symbolTable.clone();
-        snapshot.restoreStack = try ll_utils.clone(self.allocator, self.restoreStack);
     }
 
     pub fn restoreSnapshot(self: *ParseState, snapshot: *ParseState) void {
@@ -95,60 +120,38 @@ const ParseState = struct {
         self.* = snapshot.*;
     }
 
-    fn enter(self: *ParseState, name: []const u8) !elt.Symbol {
-        const sym = self.symbolIterator;
-
-        var node: *LL.Node = undefined;
-
-        if (self.symbolTable.get(name)) |oldSym| {
-            node = try alloc_utils.createWith(self.allocator, LL.Node { .data = .{
-                .name = name,
-                .oldSym = oldSym,
-            } });
-
-            self.restoreStack.prepend(node);
+    pub fn enter(self: *ParseState, name: []const u8) !elt.Symbol {
+        if (self.symbolTable.getEntry(name)) |existing| {
+            existing.value_ptr.count += 1;
+            return existing.value_ptr.symbol;
         }
         else {
-            node = try alloc_utils.createWith(self.allocator, LL.Node { .data = .{
-                .name = name,
-            } });
-
-            self.restoreStack.prepend(node);
+            const sym = self.symbolIterator;
+            try self.symbolTable.put(try self.allocator.dupe(u8, name), .{ .symbol = sym, .count = 1 });
+            self.symbolIterator += 1;
+            return sym;
         }
-        errdefer self.allocator.destroy(node);
-
-        try self.symbolTable.put(name, sym);
-        
-        self.symbolIterator += 1;
-        return sym;
     }
 
-    fn exit(self: *ParseState) !void {
-        if (self.restoreStack.popFirst()) |symInfoPtr| {
-            defer self.allocator.destroy(symInfoPtr);
-            
-            const symInfo = symInfoPtr.*.data;
-            const name = symInfo.name;
-            if (symInfo.oldSym) |oldSym| {
-                try self.symbolTable.put(name, oldSym);
+    pub fn exit(self: *ParseState, name: []const u8) !void {
+        if (self.symbolTable.getEntry(name)) |existing| {
+            if (existing.value_ptr.count == 0) {
+                return error.Internal;
             }
-            else {
-                _ = self.symbolTable.remove(name);
-            }
+            existing.value_ptr.count -= 1;
         }
         else {
-            return ParseError.Internal;
+            return error.Internal;
         }
     }
 
     fn getSymbolFromName(self: ParseState, name: []const u8) ?elt.Symbol {
-        return self.symbolTable.get(name);
-    }
-
-    fn getNewSymbol(self: ParseState) elt.Symbol {
-        const sym = self.symbolIterator;
-        self.symbolIterator += 1;
-        return sym;
+        if (self.symbolTable.get(name)) |entry| {
+            if (entry.count != 0) {
+                return entry.symbol;
+            }
+        }
+        return null;
     }
 };
 
@@ -169,9 +172,9 @@ test "parse '\\x. (\\x. x) x'" {
                 .apply => |app| {
                     switch (app.target.*) {
                         .lambda => |lam2| {
-                            try expect(lam2.param == 1);
+                            try expect(lam2.param == 0);
                             switch (lam2.body.*) {
-                                .variable => |sym| try expect(sym == 1),
+                                .variable => |sym| try expect(sym == 0),
                                 else => return error.Fail,
                             }
                         },
@@ -386,7 +389,7 @@ fn parseLambda(st: *ParseState, str: []const u8) !ParseElementResult {
     rest = rest[1..];
 
     const sym = try st.enter(identInfo.@"0");
-    defer st.exit() catch unreachable;
+    defer st.exit(identInfo.@"0") catch unreachable;
 
     const body = try parseRoot(st, rest);
 
@@ -419,7 +422,7 @@ test "parseLambda \\x. x" {
     }
 }
 
-test "parseLambda \\x. a when a already exists" {
+test "parseLambda \\x. a" {
     var st = ParseState.init(std.testing.allocator);
     defer st.deinit();
 
@@ -432,26 +435,6 @@ test "parseLambda \\x. a when a already exists" {
             try expect(lam.param == 1);
             switch (lam.body.*) {
                 .variable => |value| try expect(value == 0),
-                else => return error.Fail,
-            }
-        },
-        else => return error.Fail,
-    }
-}
-
-test "parseLambda \\x. x when x already exists" {
-    var st = ParseState.init(std.testing.allocator);
-    defer st.deinit();
-
-    _ = try st.enter("x");
-    const result = try parseLambda(&st, "\\x. x");
-    defer result.elt.free(std.testing.allocator);
-
-    switch (result.elt.*) {
-        .lambda => |lam| {
-            try expect(lam.param == 1);
-            switch (lam.body.*) {
-                .variable => |value| try expect(value == 1),
                 else => return error.Fail,
             }
         },

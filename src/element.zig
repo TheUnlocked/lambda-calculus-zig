@@ -1,7 +1,7 @@
 const std = @import("std");
 const alloc_utils = @import("alloc_utils.zig");
 
-pub const Symbol = i32;
+pub const Symbol = u32;
 
 pub const ElementTag = enum {
     variable,
@@ -93,6 +93,14 @@ pub fn Element(mutable: bool) type {
 
         pub fn castImmutable(self: *Element(true)) *Element(false) {
             return @ptrCast(*Element(false), self);
+        }
+
+        pub fn size(self: *Self) usize {
+            return @sizeOf(Self) + switch (self.*) {
+                .variable => 0,
+                .lambda => |lam| lam.body.size(),
+                .apply => |app| app.target.size() + app.arg.size(),
+            };
         }
     };
 }
